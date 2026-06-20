@@ -13,9 +13,14 @@ onMounted(() => {
 
 function handlePlanRoute() {
   if (store.waypoints.length < 2) return;
-  const first = store.waypoints[0];
-  const last = store.waypoints[store.waypoints.length - 1];
-  store.planRoute([first.lat, first.lng], [last.lat, last.lng]);
+  const hasLocked = store.waypoints.some((w) => w.locked);
+  if (hasLocked) {
+    store.replanRoutePreservingLocks();
+  } else {
+    const first = store.waypoints[0];
+    const last = store.waypoints[store.waypoints.length - 1];
+    store.planRoute([first.lat, first.lng], [last.lat, last.lng]);
+  }
 }
 </script>
 

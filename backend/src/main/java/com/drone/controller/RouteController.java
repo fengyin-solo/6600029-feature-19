@@ -39,6 +39,30 @@ public class RouteController {
         return routeService.getTerrain();
     }
 
+    @PostMapping("/route/plan-with-locks")
+    public List<Waypoint> planRouteWithLocks(@RequestBody Map<String, Object> request) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> wpData = (List<Map<String, Object>>) request.get("waypoints");
+        String algorithm = (String) request.getOrDefault("algorithm", "astar");
+
+        List<Waypoint> waypoints = new java.util.ArrayList<>();
+        for (Map<String, Object> w : wpData) {
+            Boolean locked = w.get("locked") != null ?
+                (Boolean) w.get("locked") : false;
+            waypoints.add(new Waypoint(
+                (String) w.get("id"),
+                ((Number) w.get("lat")).doubleValue(),
+                ((Number) w.get("lng")).doubleValue(),
+                ((Number) w.get("altitude")).doubleValue(),
+                ((Number) w.get("speed")).doubleValue(),
+                (String) w.get("action"),
+                locked
+            ));
+        }
+
+        return routeService.planRouteWithLocks(waypoints, algorithm);
+    }
+
     @PostMapping("/route/export")
     public Map<String, String> exportRoute(@RequestBody Map<String, Object> request) {
         @SuppressWarnings("unchecked")
@@ -47,13 +71,16 @@ public class RouteController {
 
         List<Waypoint> waypoints = new java.util.ArrayList<>();
         for (Map<String, Object> w : wpData) {
+            Boolean locked = w.get("locked") != null ?
+                (Boolean) w.get("locked") : false;
             waypoints.add(new Waypoint(
                 (String) w.get("id"),
                 ((Number) w.get("lat")).doubleValue(),
                 ((Number) w.get("lng")).doubleValue(),
                 ((Number) w.get("altitude")).doubleValue(),
                 ((Number) w.get("speed")).doubleValue(),
-                (String) w.get("action")
+                (String) w.get("action"),
+                locked
             ));
         }
 

@@ -159,6 +159,90 @@ public class RouteService {
         return terrain;
     }
 
+    public List<Waypoint> planRouteWithLocks(List<Waypoint> waypoints, String algorithm) {
+        if (waypoints == null || waypoints.size() < 2) return waypoints;
+
+        List<Integer> anchorIndices = new ArrayList<>();
+        for (int i = 0; i < waypoints.size(); i++) {
+            Waypoint wp = waypoints.get(i);
+            if (i == 0 || i == waypoints.size() - 1 ||
+                (wp.getLocked() != null && wp.getLocked())) {
+                anchorIndices.add(i);
+            }
+        }
+
+        if (anchorIndices.size() < 2) {
+            anchorIndices.clear();
+            anchorIndices.add(0);
+            anchorIndices.add(waypoints.size() - 1);
+        }
+
+        Set<Integer> uniqueSet = new LinkedHashSet<>(anchorIndices);
+        List<Integer> uniqueAnchors = new ArrayList<>(uniqueSet);
+        Collections.sort(uniqueAnchors);
+        if (uniqueAnchors.get(0) != 0) uniqueAnchors.add(0, 0);
+        if (uniqueAnchors.get(uniqueAnchors.size() - 1) != waypoints.size() - 1) {
+            uniqueAnchors.add(waypoints.size() - 1);
+        }
+
+        List<Waypoint> result = new ArrayList<>();
+        int globalIdx = 0;
+
+        for (int seg = 0; seg < uniqueAnchors.size() - 1; seg++) {
+            int startIdx = uniqueAnchors.get(seg);
+            int endIdx = uniqueAnchors.get(seg + 1);
+            Waypoint startWp = waypoints.get(startIdx);
+            Waypoint endWp = waypoints.get(endIdx);
+
+            if (seg == 0) {
+                result.add(new Waypoint(
+                    startWp.getId(), startWp.getLat(), startWp.getLng(),
+                    startWp.getAltitude(), startWp.getSpeed(), startWp.getAction(),
+                    startWp.getLocked()
+                ));
+            }
+
+            if (endIdx - startIdx == 1) {
+                if (seg > 0) {
+                    result.add(new Waypoint(
+                        endWp.getId(), endWp.getLat(), endWp.getLng(),
+                        endWp.getAltitude(), endWp.getSpeed(), endWp.getAction(),
+                        endWp.getLocked()
+                    ));
+                }
+                continue;
+            }
+
+            List<Waypoint> segmentPath = planRoute(
+                startWp.getLat(), startWp.getLng(),
+                endWp.getLat(), endWp.getLng(),
+                algorithm
+            );
+
+            if (segmentPath.size() >= 2) {
+                segmentPath = new ArrayList<>(segmentPath.subList(1, segmentPath.size()));
+            }
+
+            if (!segmentPath.isEmpty()) {
+                Waypoint lastInSeg = segmentPath.get(segmentPath.size() - 1);
+                segmentPath.set(segmentPath.size() - 1, new Waypoint(
+                    endWp.getId() != null ? endWp.getId() : lastInSeg.getId(),
+                    endWp.getLat(), endWp.getLng(),
+                    endWp.getAltitude(), endWp.getSpeed(), endWp.getAction(),
+                    endWp.getLocked()
+                ));
+            }
+
+            for (Waypoint wp : segmentPath) {
+                wp.setId("wp-planned-" + (globalIdx++));
+                if (wp.getLocked() == null) wp.setLocked(false);
+                result.add(wp);
+            }
+        }
+
+        return result;
+    }
+
     public String exportKML(List<Waypoint> waypoints, String name) {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");

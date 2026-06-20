@@ -5,6 +5,7 @@ export interface Waypoint {
   altitude: number;   // meters AGL
   speed: number;      // m/s
   action: 'hover' | 'photo' | 'video' | 'none';
+  locked?: boolean;
 }
 
 export interface FlightPlan {

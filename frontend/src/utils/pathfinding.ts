@@ -348,6 +348,140 @@ ${placemarks}
 </kml>`;
 }
 
+// ─── Segmented Route Planning with Locked Waypoints ─────────────────────────
+export function planRouteWithLocks(
+  waypoints: Waypoint[],
+  algorithm: 'astar' | 'rrt',
+  noFlyZones: NoFlyZone[],
+  bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number },
+  gridSize = 30
+): Waypoint[] {
+  if (waypoints.length < 2) return [...waypoints];
+
+  const anchorIndices: number[] = [];
+  waypoints.forEach((wp, idx) => {
+    if (idx === 0 || idx === waypoints.length - 1 || wp.locked) {
+      anchorIndices.push(idx);
+    }
+  });
+
+  if (anchorIndices.length < 2) {
+    anchorIndices.unshift(0);
+    anchorIndices.push(waypoints.length - 1);
+  }
+
+  const uniqueAnchors = Array.from(new Set(anchorIndices)).sort((a, b) => a - b);
+  if (uniqueAnchors[0] !== 0) uniqueAnchors.unshift(0);
+  if (uniqueAnchors[uniqueAnchors.length - 1] !== waypoints.length - 1) {
+    uniqueAnchors.push(waypoints.length - 1);
+  }
+
+  const result: Waypoint[] = [];
+  let globalIdx = 0;
+
+  for (let seg = 0; seg < uniqueAnchors.length - 1; seg++) {
+    const startIdx = uniqueAnchors[seg];
+    const endIdx = uniqueAnchors[seg + 1];
+    const startWp = waypoints[startIdx];
+    const endWp = waypoints[endIdx];
+
+    if (seg === 0) {
+      result.push({ ...startWp });
+    }
+
+    if (endIdx - startIdx === 1) {
+      if (seg > 0) {
+        result.push({ ...endWp });
+      }
+      continue;
+    }
+
+    const start: [number, number] = [startWp.lat, startWp.lng];
+    const goal: [number, number] = [endWp.lat, endWp.lng];
+    let segmentPath: Waypoint[];
+
+    if (algorithm === 'astar') {
+      segmentPath = aStarPathfind(start, goal, gridSize, noFlyZones, bounds);
+    } else {
+      segmentPath = rrtPathfind(start, goal, noFlyZones);
+    }
+
+    if (segmentPath.length >= 2) {
+      segmentPath = segmentPath.slice(1);
+    }
+
+    if (segmentPath.length > 0) {
+      segmentPath[segmentPath.length - 1] = { ...endWp };
+    }
+
+    for (const wp of segmentPath) {
+      result.push({
+        ...wp,
+        id: `wp-planned-${globalIdx++}-${Math.random().toString(36).slice(2, 6)}`,
+      });
+    }
+  }
+
+  const smoothed = smoothPathWithLocks(result, 5);
+  return smoothed;
+}
+
+function smoothPathWithLocks(waypoints: Waypoint[], segments = 5): Waypoint[] {
+  if (waypoints.length < 3) return [...waypoints];
+
+  const result: Waypoint[] = [];
+
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+
+    if (wp.locked) {
+      result.push({ ...wp });
+      continue;
+    }
+
+    if (result.length === 0) {
+      result.push({ ...wp });
+      continue;
+    }
+
+    const prev = waypoints[Math.max(0, i - 1)];
+    const curr = waypoints[i];
+    const next = waypoints[Math.min(waypoints.length - 1, i + 1)];
+    const next2 = waypoints[Math.min(waypoints.length - 1, i + 2)];
+
+    if (next.locked || i === waypoints.length - 1) {
+      result.push({ ...wp });
+      continue;
+    }
+
+    const cr = (p0: number, p1: number, p2: number, p3: number, t: number) => {
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return 0.5 * (
+        2 * p1 +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+      );
+    };
+
+    for (let s = 1; s <= segments; s++) {
+      const t = s / segments;
+      result.push({
+        id: `wp-smooth-${i}-${s}-${Math.random().toString(36).slice(2, 6)}`,
+        lat: cr(prev.lat, curr.lat, next.lat, next2.lat, t),
+        lng: cr(prev.lng, curr.lng, next.lng, next2.lng, t),
+        altitude: cr(prev.altitude, curr.altitude, next.altitude, next2.altitude, t),
+        speed: cr(prev.speed, curr.speed, next.speed, next2.speed, t),
+        action: curr.action,
+        locked: false,
+      });
+    }
+  }
+
+  return result;
+}
+
 // ─── Mock Data ──────────────────────────────────────────────────────────────
 export const mockNoFlyZones: NoFlyZone[] = [
   {

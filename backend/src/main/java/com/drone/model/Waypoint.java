@@ -7,6 +7,7 @@ public class Waypoint {
     private double altitude;
     private double speed;
     private String action;
+    private Boolean locked;
 
     public Waypoint() {}
 
@@ -17,6 +18,17 @@ public class Waypoint {
         this.altitude = altitude;
         this.speed = speed;
         this.action = action;
+        this.locked = false;
+    }
+
+    public Waypoint(String id, double lat, double lng, double altitude, double speed, String action, Boolean locked) {
+        this.id = id;
+        this.lat = lat;
+        this.lng = lng;
+        this.altitude = altitude;
+        this.speed = speed;
+        this.action = action;
+        this.locked = locked;
     }
 
     public String getId() { return id; }
@@ -31,4 +43,6 @@ public class Waypoint {
     public void setSpeed(double speed) { this.speed = speed; }
     public String getAction() { return action; }
     public void setAction(String action) { this.action = action; }
+    public Boolean getLocked() { return locked; }
+    public void setLocked(Boolean locked) { this.locked = locked; }
 }

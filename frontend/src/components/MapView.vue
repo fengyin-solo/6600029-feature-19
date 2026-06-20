@@ -14,6 +14,13 @@ let droneMarker: L.CircleMarker | null = null;
 
 const addMode = ref(false);
 
+declare global {
+  interface Window {
+    __droneRemoveWaypoint?: (id: string) => void;
+    __droneToggleLock?: (id: string) => void;
+  }
+}
+
 function initMap() {
   if (!mapContainer.value || map) return;
   map = L.map(mapContainer.value).setView(store.mapCenter, 12);
@@ -24,6 +31,13 @@ function initMap() {
 
   waypointLayer = L.layerGroup().addTo(map);
   zoneLayer = L.layerGroup().addTo(map);
+
+  window.__droneRemoveWaypoint = (id: string) => store.removeWaypoint(id);
+  window.__droneToggleLock = (id: string) => {
+    store.toggleWaypointLock(id);
+    drawWaypoints();
+    drawRoute();
+  };
 
   map.on('click', (e: L.LeafletMouseEvent) => {
     if (addMode.value) {
@@ -55,27 +69,55 @@ function drawWaypoints() {
   if (!waypointLayer) return;
   waypointLayer.clearLayers();
   store.waypoints.forEach((wp, idx) => {
+    const isLocked = !!wp.locked;
     const marker = L.circleMarker([wp.lat, wp.lng], {
-      radius: 8,
-      color: '#3b82f6',
-      fillColor: '#60a5fa',
+      radius: isLocked ? 10 : 8,
+      color: isLocked ? '#f59e0b' : '#3b82f6',
+      fillColor: isLocked ? '#fbbf24' : '#60a5fa',
       fillOpacity: 0.9,
-      weight: 2,
+      weight: isLocked ? 3 : 2,
+      dashArray: isLocked ? 'none' : undefined,
     });
-    marker.bindTooltip(`WP${idx + 1}`, { permanent: true, direction: 'top', className: 'wp-tooltip' });
+    const label = `${isLocked ? '🔒 ' : ''}WP${idx + 1}`;
+    marker.bindTooltip(label, {
+      permanent: true,
+      direction: 'top',
+      className: isLocked ? 'wp-tooltip wp-tooltip-locked' : 'wp-tooltip',
+    });
+
+    const lockBtnLabel = isLocked
+      ? `<button onclick="window.__droneToggleLock('${wp.id}')" style="margin-top:4px;color:#2563eb;padding:2px 6px;border:1px solid #2563eb;border-radius:4px;background:transparent;cursor:pointer">🔓 解锁</button>`
+      : `<button onclick="window.__droneToggleLock('${wp.id}')" style="margin-top:4px;color:#f59e0b;padding:2px 6px;border:1px solid #f59e0b;border-radius:4px;background:transparent;cursor:pointer">🔒 锁定</button>`;
+
+    const canRemove = !isLocked;
+    const removeBtn = canRemove
+      ? `<button onclick="window.__droneRemoveWaypoint('${wp.id}')" style="margin-top:4px;color:#ef4444;padding:2px 6px;border:1px solid #ef4444;border-radius:4px;background:transparent;cursor:pointer">删除</button>`
+      : `<span style="margin-top:4px;color:#64748b;font-size:11px">（锁定中无法删除）</span>`;
+
+    const dragHint = isLocked ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px">位置已锁定，不可拖动</div>` : '';
+
     marker.bindPopup(`
-      <div style="min-width:160px">
-        <b>Waypoint ${idx + 1}</b><br>
-        Altitude: ${wp.altitude}m<br>
-        Speed: ${wp.speed} m/s<br>
-        Action: ${wp.action}<br>
-        <button onclick="this.closest('.leaflet-popup').remove()" style="margin-top:4px;color:#ef4444">Remove</button>
+      <div style="min-width:180px">
+        <b>航点 ${idx + 1}${isLocked ? ' 🔒' : ''}</b><br>
+        高度: ${wp.altitude}m<br>
+        速度: ${wp.speed} m/s<br>
+        动作: ${wp.action}<br>
+        ${lockBtnLabel}
+        ${removeBtn}
+        ${dragHint}
       </div>
     `);
-    marker.on('dragend', (e: any) => {
-      const ll = e.target.getLatLng();
-      store.updateWaypoint(wp.id, { lat: ll.lat, lng: ll.lng });
-    });
+
+    if (!isLocked) {
+      (marker as any).dragging?.enable();
+      marker.on('dragend', (e: any) => {
+        const ll = e.target.getLatLng();
+        store.updateWaypoint(wp.id, { lat: ll.lat, lng: ll.lng });
+      });
+    } else {
+      (marker as any).dragging?.disable();
+    }
+
     marker.addTo(waypointLayer!);
   });
 }
@@ -89,7 +131,6 @@ function drawRoute() {
 
   const latlngs = store.waypoints.map((w) => [w.lat, w.lng] as [number, number]);
 
-  // Check near obstacles for coloring
   let hasDanger = false;
   for (const wp of store.waypoints) {
     for (const zone of store.noFlyZones) {
@@ -132,10 +173,10 @@ function drawSimDrone() {
   }
 }
 
-watch(() => store.waypoints.length, () => {
+watch(() => store.waypoints, () => {
   drawWaypoints();
   drawRoute();
-});
+}, { deep: true });
 
 watch(() => store.noFlyZones.length, drawNoFlyZones);
 watch(() => store.simProgress, drawSimDrone);
@@ -149,6 +190,8 @@ onUnmounted(() => {
     map.remove();
     map = null;
   }
+  delete window.__droneRemoveWaypoint;
+  delete window.__droneToggleLock;
 });
 
 function toggleAddMode() {
@@ -161,6 +204,19 @@ function handlePlanRoute() {
   const last = store.waypoints[store.waypoints.length - 1];
   store.planRoute([first.lat, first.lng], [last.lat, last.lng]);
 }
+
+function handleReplanWithLocks() {
+  store.replanRoutePreservingLocks();
+}
+
+const hasLockedWaypoints = ref(false);
+watch(
+  () => store.waypoints,
+  () => {
+    hasLockedWaypoints.value = store.waypoints.some((w) => w.locked);
+  },
+  { deep: true, immediate: true }
+);
 </script>
 
 <template>
@@ -178,14 +234,34 @@ function handlePlanRoute() {
         @click="handlePlanRoute"
         class="px-3 py-1 rounded text-xs font-medium bg-green-700 text-white shadow hover:opacity-90 transition"
       >
-        规划航线
+        🧭 规划航线
+      </button>
+      <button
+        v-if="store.waypoints.length >= 2"
+        @click="handleReplanWithLocks"
+        :class="hasLockedWaypoints ? 'bg-amber-600 hover:bg-amber-500' : 'bg-gray-700 hover:bg-gray-600'"
+        class="px-3 py-1 rounded text-xs font-medium text-white shadow hover:opacity-90 transition"
+        :title="hasLockedWaypoints ? '重新规划，保留已锁定航点' : '重新规划航线'"
+      >
+        🔒 重新规划{{ hasLockedWaypoints ? '（保留锁定）' : '' }}
       </button>
       <button
         @click="store.clearRoute()"
         class="px-3 py-1 rounded text-xs font-medium bg-red-700 text-white shadow hover:opacity-90 transition"
       >
-        清除
+        🗑 清除
       </button>
+    </div>
+
+    <div class="absolute bottom-2 left-2 z-[1000] bg-slate-900/80 backdrop-blur rounded p-2 text-[10px] text-slate-300 space-y-1">
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-3 h-3 rounded-full bg-blue-400 border-2 border-blue-500"></span>
+        <span>普通航点（可拖动）</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-3 h-3 rounded-full bg-amber-400 border-[3px] border-amber-500"></span>
+        <span>🔒 锁定航点（位置固定）</span>
+      </div>
     </div>
   </div>
 </template>
@@ -198,5 +274,11 @@ function handlePlanRoute() {
   font-size: 10px;
   padding: 1px 4px;
   border-radius: 4px;
+}
+:deep(.wp-tooltip-locked) {
+  background: rgba(146, 64, 14, 0.9);
+  color: #fef3c7;
+  border: 1px solid #f59e0b;
+  font-weight: 600;
 }
 </style>

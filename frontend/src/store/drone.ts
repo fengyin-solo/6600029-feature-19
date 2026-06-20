@@ -10,6 +10,7 @@ import {
   exportKML,
   mockNoFlyZones,
   mockTerrainData,
+  planRouteWithLocks,
 } from '../utils/pathfinding';
 
 export const useDroneStore = defineStore('drone', () => {
@@ -36,10 +37,11 @@ export const useDroneStore = defineStore('drone', () => {
     lng: number,
     altitude = 100,
     speed = 10,
-    action: Waypoint['action'] = 'none'
+    action: Waypoint['action'] = 'none',
+    locked = false
   ) {
     const id = `wp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    waypoints.value.push({ id, lat, lng, altitude, speed, action });
+    waypoints.value.push({ id, lat, lng, altitude, speed, action, locked });
   }
 
   function removeWaypoint(id: string) {
@@ -49,6 +51,11 @@ export const useDroneStore = defineStore('drone', () => {
   function updateWaypoint(id: string, updates: Partial<Waypoint>) {
     const wp = waypoints.value.find((w) => w.id === id);
     if (wp) Object.assign(wp, updates);
+  }
+
+  function toggleWaypointLock(id: string) {
+    const wp = waypoints.value.find((w) => w.id === id);
+    if (wp) wp.locked = !wp.locked;
   }
 
   function planRoute(start: [number, number], goal: [number, number]) {
@@ -61,6 +68,20 @@ export const useDroneStore = defineStore('drone', () => {
     }
     const smoothed = smoothPath(raw);
     waypoints.value = smoothed;
+    updatePlan();
+  }
+
+  function replanRoutePreservingLocks() {
+    if (waypoints.value.length < 2) return;
+    const bounds = { minLat: 39.85, maxLat: 39.95, minLng: 116.35, maxLng: 116.45 };
+    const replanned = planRouteWithLocks(
+      waypoints.value,
+      selectedAlgorithm.value,
+      noFlyZones.value,
+      bounds,
+      30
+    );
+    waypoints.value = replanned;
     updatePlan();
   }
 
@@ -163,7 +184,9 @@ export const useDroneStore = defineStore('drone', () => {
     addWaypoint,
     removeWaypoint,
     updateWaypoint,
+    toggleWaypointLock,
     planRoute,
+    replanRoutePreservingLocks,
     clearRoute,
     simulateFlight,
     loadMockData,
